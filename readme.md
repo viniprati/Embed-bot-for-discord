@@ -1,4 +1,3 @@
-````md
 # 🤖 Template — Bot Gerador de Embeds (Discord.js v14)
 
 Um template simples de bot para Discord que cria **embeds via Slash Command** usando **Modal** (formulário).  
