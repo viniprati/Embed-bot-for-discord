@@ -9,14 +9,12 @@ const client = new Client({
     ]
 });
 
+// Função para formatar emojis personalizados
 function formatarTextoComEmojis(texto, client) {
     if (!texto) return texto;
-
     const regex = /(?<!<a?):(\w+):(?!\d+>)/g;
-
     return texto.replace(regex, (match, nomeEmoji) => {
         const emoji = client.emojis.cache.find(e => e.name.toLowerCase() === nomeEmoji.toLowerCase());
-        
         return emoji ? emoji.toString() : match;
     });
 }
@@ -24,7 +22,7 @@ function formatarTextoComEmojis(texto, client) {
 const commands = [
     new SlashCommandBuilder()
         .setName('embed')
-        .setDescription('Criar Embed')
+        .setDescription('Criar Embed com Banner e Thumbnail')
 ]
 .map(command => command.toJSON());
 
@@ -53,13 +51,15 @@ client.on('interactionCreate', async interaction => {
                 .setCustomId('modalMimu')
                 .setTitle('Criar Anúncio');
 
+            // 1. Título
             const tituloInput = new TextInputBuilder()
                 .setCustomId('titulo')
                 .setLabel("Título")
                 .setStyle(TextInputStyle.Short)
-                .setPlaceholder('Ex: Tabela de Preços')
+                .setPlaceholder('Ex: Novidades do Servidor')
                 .setRequired(true);
 
+            // 2. Descrição
             const descricaoInput = new TextInputBuilder()
                 .setCustomId('descricao')
                 .setLabel("Descrição")
@@ -67,6 +67,7 @@ client.on('interactionCreate', async interaction => {
                 .setPlaceholder('Ex: > :dinheiro: Valor: 10,00') 
                 .setRequired(true);
 
+            // 3. Cor
             const corInput = new TextInputBuilder()
                 .setCustomId('cor')
                 .setLabel("Cor Hex (Ex: #2b2d31)")
@@ -74,17 +75,29 @@ client.on('interactionCreate', async interaction => {
                 .setValue('#2b2d31')
                 .setRequired(false);
 
-            const imagemInput = new TextInputBuilder()
-                .setCustomId('imagem')
-                .setLabel("Link da Imagem (Opcional)")
+            // 4. Thumbnail (Imagem Pequena) - NOVO
+            const thumbnailInput = new TextInputBuilder()
+                .setCustomId('thumbnail')
+                .setLabel("Link da Miniatura/Logo (Opcional)")
                 .setStyle(TextInputStyle.Short)
+                .setPlaceholder('https://...')
                 .setRequired(false);
 
+            // 5. Banner (Imagem Grande) - RENOMEADO
+            const bannerInput = new TextInputBuilder()
+                .setCustomId('banner')
+                .setLabel("Link do Banner/Imagem Grande (Opcional)")
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('https://...')
+                .setRequired(false);
+
+            // Adicionando os componentes (Máximo de 5 ActionRows)
             modal.addComponents(
                 new ActionRowBuilder().addComponents(tituloInput),
                 new ActionRowBuilder().addComponents(descricaoInput),
                 new ActionRowBuilder().addComponents(corInput),
-                new ActionRowBuilder().addComponents(imagemInput)
+                new ActionRowBuilder().addComponents(thumbnailInput),
+                new ActionRowBuilder().addComponents(bannerInput)
             );
 
             await interaction.showModal(modal);
@@ -94,10 +107,14 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isModalSubmit()) {
         if (interaction.customId === 'modalMimu') {
             
+            // Coletando os dados
             const titulo = interaction.fields.getTextInputValue('titulo');
             let descricao = interaction.fields.getTextInputValue('descricao');
             const cor = interaction.fields.getTextInputValue('cor');
-            const imagem = interaction.fields.getTextInputValue('imagem');
+            
+            // Novos campos de imagem
+            const thumbnail = interaction.fields.getTextInputValue('thumbnail');
+            const banner = interaction.fields.getTextInputValue('banner');
 
             const tituloFinal = formatarTextoComEmojis(titulo, client);
             const descricaoFinal = formatarTextoComEmojis(descricao, client);
@@ -109,11 +126,17 @@ client.on('interactionCreate', async interaction => {
                 .setFooter({ text: `Enviado por ${interaction.user.username}`, iconURL: interaction.user.displayAvatarURL() })
                 .setTimestamp();
 
-            if (imagem && imagem.startsWith('http')) {
-                embed.setImage(imagem);
+            // Lógica para adicionar Thumbnail (Canto superior direito)
+            if (thumbnail && thumbnail.startsWith('http')) {
+                embed.setThumbnail(thumbnail);
             }
 
-            await interaction.reply({ content: '✅ Embed enviado!', ephemeral: true });
+            // Lógica para adicionar Banner (Imagem grande embaixo)
+            if (banner && banner.startsWith('http')) {
+                embed.setImage(banner);
+            }
+
+            await interaction.reply({ content: '✅ Embed enviado com sucesso!', ephemeral: true });
             await interaction.channel.send({ embeds: [embed] });
         }
     }
