@@ -9,8 +9,10 @@ const {
     ModalBuilder, 
     TextInputBuilder, 
     TextInputStyle, 
-    ActionRowBuilder 
-} = require('discord.js');
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle 
+} = require('discord.js'); // Adicionado ButtonBuilder e ButtonStyle
 
 const client = new Client({
     intents: [
@@ -33,26 +35,40 @@ function formatarTextoComEmojis(texto, client) {
 
 // --- CONFIGURAÇÃO DOS COMANDOS ---
 const commands = [
-    // 1. Comando de Criar Embed (Com Upload de Arquivo)
+    // 1. Comando de Criar Embed
     new SlashCommandBuilder()
         .setName('embed')
-        .setDescription('Cria um Embed. Use as opções para enviar imagens (Upload)')
+        .setDescription('Cria um Embed e envia no canal.')
+        // Opções de Imagem
         .addAttachmentOption(option => 
             option.setName('banner')
-                .setDescription('Faça upload da imagem do Banner (Grande)')
+                .setDescription('Imagem do Banner (Grande)')
                 .setRequired(false))
         .addAttachmentOption(option => 
             option.setName('thumbnail')
-                .setDescription('Faça upload da Logo/Thumbnail (Pequena)')
+                .setDescription('Imagem da Logo/Thumbnail (Pequena)')
+                .setRequired(false))
+        // Opções do Botão
+        .addStringOption(option =>
+            option.setName('botao_texto')
+                .setDescription('Texto que vai no botão (Ex: Clique Aqui)')
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('botao_url')
+                .setDescription('Link para onde o botão vai levar (https://...)')
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('botao_emoji')
+                .setDescription('Emoji do botão (Cole o emoji aqui ou use o ID)')
                 .setRequired(false)),
 
-    // 2. Comando de Editar Mídia (Via Link)
+    // 2. Comando de Editar Mídia (Mantido igual)
     new SlashCommandBuilder()
         .setName('editar_midia')
-        .setDescription('Troca a imagem de um Embed já enviado usando o Link da Mensagem')
+        .setDescription('Troca a imagem de um Embed já enviado pelo Bot')
         .addStringOption(option => 
             option.setName('link')
-                .setDescription('Link da mensagem do Embed (Clique direito -> Copiar Link)')
+                .setDescription('Link da mensagem do Embed')
                 .setRequired(true))
         .addAttachmentOption(option => 
             option.setName('novo_banner')
@@ -69,8 +85,6 @@ const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
 client.once('ready', async () => {
     console.log(`✅ Bot logado como ${client.user.tag}!`);
-    await client.application.fetch(); 
-    
     try {
         await rest.put(
             Routes.applicationCommands(process.env.CLIENT_ID),
@@ -83,19 +97,22 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async interaction => {
-    // Verificamos se é um comando de barra
     if (!interaction.isChatInputCommand()) return;
 
     // --- LÓGICA DO COMANDO /EMBED ---
     if (interaction.commandName === 'embed') {
-        // 1. Captura os arquivos enviados no comando ANTES do modal
+        // 1. Captura opções do Slash Command (Imagens e Botão)
         const bannerFile = interaction.options.getAttachment('banner');
         const thumbFile = interaction.options.getAttachment('thumbnail');
+        
+        const btnTexto = interaction.options.getString('botao_texto');
+        const btnUrl = interaction.options.getString('botao_url');
+        const btnEmoji = interaction.options.getString('botao_emoji');
 
-        // 2. Configura o Modal para os textos
+        // 2. Configura o Modal para Título e Descrição
         const modal = new ModalBuilder()
             .setCustomId('modalEmbed')
-            .setTitle('Configurar Textos');
+            .setTitle('Criar Embed');
 
         const tituloInput = new TextInputBuilder()
             .setCustomId('titulo')
@@ -122,23 +139,19 @@ client.on('interactionCreate', async interaction => {
             new ActionRowBuilder().addComponents(corInput)
         );
 
-        // 3. Mostra o Modal
         await interaction.showModal(modal);
 
-        // 4. Aguarda o envio do Modal (Isso une o arquivo do comando com o texto do modal)
         const filter = (i) => i.customId === 'modalEmbed' && i.user.id === interaction.user.id;
         
         try {
-            // Espera até 5 minutos pelo envio
             const submitted = await interaction.awaitModalSubmit({ filter, time: 300_000 });
-            await submitted.deferReply({ ephemeral: false }); 
+            await submitted.deferReply({ ephemeral: true }); 
 
             // Dados do Modal
             const titulo = submitted.fields.getTextInputValue('titulo');
             const descricao = submitted.fields.getTextInputValue('descricao');
             const cor = submitted.fields.getTextInputValue('cor') || '#2b2d31';
 
-            // Formata Emojis
             const tituloFinal = formatarTextoComEmojis(titulo, client);
             const descricaoFinal = formatarTextoComEmojis(descricao, client);
 
@@ -146,39 +159,66 @@ client.on('interactionCreate', async interaction => {
                 .setTitle(tituloFinal)
                 .setDescription(descricaoFinal)
                 .setColor(cor)
-                .setFooter({ text: `Enviado por ${interaction.user.username}`, iconURL: interaction.user.displayAvatarURL() })
                 .setTimestamp();
 
-            // ARRAY DE ARQUIVOS PARA ENVIAR
+            // Configuração das Imagens
             const filesToSend = [];
 
-            // Se o usuário upou um Banner
             if (bannerFile) {
                 filesToSend.push(bannerFile);
                 embed.setImage(`attachment://${bannerFile.name}`);
             }
 
-            // Se o usuário upou uma Thumbnail
             if (thumbFile) {
                 filesToSend.push(thumbFile);
                 embed.setThumbnail(`attachment://${thumbFile.name}`);
             }
 
-            // Envia a resposta final
-            await submitted.editReply({ 
-                content: '✅ Embed criado com sucesso!',
+            // --- CONFIGURAÇÃO DO BOTÃO ---
+            const components = [];
+
+            // Só cria o botão se tiver Texto E Link
+            if (btnTexto && btnUrl) {
+                // Validação básica de URL (começar com http)
+                if (!btnUrl.startsWith('http')) {
+                    return submitted.editReply({ content: '❌ O link do botão precisa começar com `http://` ou `https://`.' });
+                }
+
+                const button = new ButtonBuilder()
+                    .setLabel(btnTexto)
+                    .setURL(btnUrl)
+                    .setStyle(ButtonStyle.Link);
+
+                if (btnEmoji) {
+                    button.setEmoji(btnEmoji);
+                }
+
+                const row = new ActionRowBuilder().addComponents(button);
+                components.push(row);
+            }
+
+            // Envia no CANAL
+            await interaction.channel.send({ 
                 embeds: [embed], 
-                files: filesToSend 
+                files: filesToSend,
+                components: components // Adiciona o botão aqui
             });
+
+            await submitted.editReply({ content: '✅ Embed enviada no canal com sucesso!' });
 
         } catch (error) {
             if (error.code !== 'InteractionCollectorError') {
                 console.error(error);
+                try {
+                     if (!interaction.replied && !interaction.deferred) {
+                        await interaction.reply({ content: '❌ Ocorreu um erro ao criar a embed.', ephemeral: true });
+                     }
+                } catch (e) {}
             }
         }
     }
 
-    // --- LÓGICA DO COMANDO /EDITAR_MIDIA ---
+    // --- LÓGICA DO COMANDO /EDITAR_MIDIA (Igual ao anterior) ---
     if (interaction.commandName === 'editar_midia') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -186,13 +226,10 @@ client.on('interactionCreate', async interaction => {
         const novoBanner = interaction.options.getAttachment('novo_banner');
         const novaThumbnail = interaction.options.getAttachment('nova_thumbnail');
 
-        // Regex para extrair IDs do link: https://discord.com/channels/GUILD/CHANNEL/MESSAGE
         const regex = /channels\/(\d+)\/(\d+)\/(\d+)/;
         const match = link.match(regex);
 
-        if (!match) {
-            return interaction.editReply('❌ Link inválido! Copie o "Link da Mensagem" corretamente.');
-        }
+        if (!match) return interaction.editReply('❌ Link inválido!');
 
         const [_, guildId, channelId, messageId] = match;
 
@@ -203,46 +240,32 @@ client.on('interactionCreate', async interaction => {
             const mensagemAlvo = await canal.messages.fetch(messageId);
             if (!mensagemAlvo) return interaction.editReply('❌ Mensagem não encontrada.');
 
-            // Verifica se a mensagem é do bot
-            if (mensagemAlvo.author.id !== client.user.id) {
-                return interaction.editReply('❌ Só posso editar mensagens enviadas por mim.');
-            }
+            if (mensagemAlvo.author.id !== client.user.id) return interaction.editReply('❌ Só posso editar mensagens minhas.');
 
-            if (mensagemAlvo.embeds.length === 0) {
-                return interaction.editReply('❌ Essa mensagem não tem Embed.');
-            }
-
-            // Clona o Embed existente para manter o texto
             const novoEmbed = EmbedBuilder.from(mensagemAlvo.embeds[0]);
             const arquivosParaEnviar = [];
 
-            // Atualiza Banner se foi enviado
             if (novoBanner) {
                 arquivosParaEnviar.push(novoBanner);
                 novoEmbed.setImage(`attachment://${novoBanner.name}`);
             }
-
-            // Atualiza Thumbnail se foi enviada
             if (novaThumbnail) {
                 arquivosParaEnviar.push(novaThumbnail);
                 novoEmbed.setThumbnail(`attachment://${novaThumbnail.name}`);
             }
 
-            if (arquivosParaEnviar.length === 0) {
-                return interaction.editReply('⚠️ Você precisa enviar pelo menos uma imagem nova.');
-            }
+            if (arquivosParaEnviar.length === 0) return interaction.editReply('⚠️ Nenhuma imagem nova anexada.');
 
-            // Edita a mensagem trocando os arquivos
             await mensagemAlvo.edit({ 
                 embeds: [novoEmbed], 
                 files: arquivosParaEnviar 
             });
 
-            await interaction.editReply(`✅ Mídia atualizada com sucesso! [Ir para mensagem](${link})`);
+            await interaction.editReply(`✅ Atualizado! [Ver mensagem](${link})`);
 
         } catch (erro) {
             console.error(erro);
-            await interaction.editReply('❌ Erro ao editar. Verifique minhas permissões no canal.');
+            await interaction.editReply('❌ Erro ao editar.');
         }
     }
 });
